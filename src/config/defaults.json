@@ -1,0 +1,20 @@
+{
+  "format": "gen9championsbssregma",
+  "month": "latest",
+  "rating": "1500",
+  "megaPolicy": "auto",
+  "naturePolicy": "fixed",
+  "excludeOther": true,
+  "setupBoost": 0,
+  "coarseTopK": 300,
+  "finalTopK": 20,
+  "sampler": {
+    "topSpecies": 80,
+    "topItemsPerSpecies": 5,
+    "topAbilitiesPerSpecies": 3,
+    "topSpreadsPerSpecies": 10,
+    "topMovesPerSpecies": 12,
+    "maxSetSamplesPerSpecies": 20,
+    "maxOpponentSamples": 1500
+  }
+}

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Local package manager cache
+.npm-cache/
+
+# Test and runtime caches
+test/tmp-cache/
+src/stats/cache/
+
+# Local Codex/agent workspace configuration
+.codex/
+.agents/
+
+# Local environment and logs
+.env
+.env.*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Coverage and build output
+coverage/
+dist/
+build/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

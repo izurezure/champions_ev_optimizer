@@ -1,0 +1,18 @@
+{
+  "name": "champions-ev-optimizer",
+  "version": "0.1.0",
+  "description": "Local Champions Stat Point optimizer using Pokemon Showdown paste input and Smogon chaos stats.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "cli": "node src/cli.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@pkmn/dex": "^0.10.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20"
+  }
+}

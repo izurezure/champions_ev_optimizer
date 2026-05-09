@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Champions EV Optimizer</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <div class="input-pane">
+          <div class="title-row">
+            <h1>Champions EV Optimizer</h1>
+            <button id="calculate" type="button">Calculate</button>
+          </div>
+          <textarea id="paste" spellcheck="false">Garchomp @ Focus Sash
+Ability: Rough Skin
+Level: 50
+- Swords Dance
+- Earthquake
+- Rock Tomb
+- Stealth Rock</textarea>
+          <div class="control-grid">
+            <label>Format<select id="format"></select></label>
+            <label>Month<input id="month" value="latest"></label>
+            <label>Rating<select id="rating"></select></label>
+            <label>Mega<select id="megaPolicy">
+              <option value="auto">auto</option>
+              <option value="always">always</option>
+              <option value="never">never</option>
+            </select></label>
+            <label>Nature<select id="naturePolicy">
+              <option value="fixed">fixed</option>
+              <option value="neutral">neutral</option>
+              <option value="optimize">optimize</option>
+            </select></label>
+            <label>Setup<select id="setupBoost">
+              <option value="0">none</option>
+              <option value="1">+1 scenario</option>
+              <option value="2">+2 scenario</option>
+            </select></label>
+          </div>
+          <label class="toggle"><input id="excludeOther" type="checkbox" checked> Exclude Other</label>
+          <div id="log" class="log"></div>
+        </div>
+        <div class="result-pane">
+          <div class="summary" id="summary"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Stat Points</th>
+                  <th>Nature</th>
+                  <th>Stats</th>
+                  <th>Z</th>
+                  <th>P</th>
+                  <th>V</th>
+                  <th>D_out</th>
+                  <th>m</th>
+                  <th>n</th>
+                  <th>Explanation</th>
+                </tr>
+              </thead>
+              <tbody id="results"></tbody>
+            </table>
+          </div>
+          <textarea id="output" readonly spellcheck="false"></textarea>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
