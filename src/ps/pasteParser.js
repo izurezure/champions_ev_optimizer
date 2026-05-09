@@ -15,6 +15,7 @@ const STAT_ALIASES = {
   spdef: 'spd',
   'sp.def': 'spd',
   'sp. def': 'spd',
+  s: 'spe',
   spe: 'spe',
   speed: 'spe'
 };
@@ -33,6 +34,7 @@ export function parsePaste(paste) {
     level: 50,
     nature: '',
     statPoints: emptyStatPoints(),
+    statPointInputs: emptyStatPointInputs(),
     moves: [],
     notes: []
   };
@@ -50,14 +52,15 @@ export function parsePaste(paste) {
     if (/^(evs|sp|stat points|statpoints):/i.test(line)) {
       const raw = line.replace(/^(evs|sp|stat points|statpoints):\s*/i, '');
       const parsed = parsePointLine(raw);
-      const total = STATS.reduce((sum, stat) => sum + parsed[stat], 0);
-      const max = Math.max(...STATS.map((stat) => parsed[stat]));
+      const total = STATS.reduce((sum, stat) => sum + parsed.points[stat], 0);
+      const max = Math.max(...STATS.map((stat) => parsed.points[stat]));
       if (/^evs:/i.test(line) && (max > 32 || total > 66)) {
-        set.statPoints = evSpreadToStatPoints(parsed);
+        set.statPoints = evSpreadToStatPoints(parsed.points);
         set.notes.push('Classic EV line was converted to Champions Stat Points using HOME transfer rounding.');
       } else {
-        set.statPoints = trimToBudget(parsed);
+        set.statPoints = trimToBudget(parsed.points);
       }
+      set.statPointInputs = parsed.inputs;
       continue;
     }
     const natureMatch = line.match(/^([A-Za-z]+)\s+Nature$/i);
@@ -83,14 +86,22 @@ function parseSpecies(identity) {
 
 function parsePointLine(raw) {
   const points = emptyStatPoints();
+  const inputs = emptyStatPointInputs();
   for (const part of String(raw).split('/')) {
     const match = part.trim().match(/^(\d+)\s+(.+)$/);
     if (!match) continue;
     const value = Number.parseInt(match[1], 10);
     const statKey = normalizeStatName(match[2]);
-    if (statKey) points[statKey] = value;
+    if (statKey) {
+      points[statKey] = value;
+      inputs[statKey] = true;
+    }
   }
-  return normalizeStatPoints(points);
+  return { points: normalizeStatPoints(points), inputs };
+}
+
+function emptyStatPointInputs() {
+  return Object.fromEntries(STATS.map((stat) => [stat, false]));
 }
 
 function normalizeStatName(name) {

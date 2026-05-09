@@ -44,6 +44,124 @@ Level: 50
   assert.match(result.explanations.join('\n'), /Focus Sash/);
 });
 
+test('fixed speed mode locks Spe first and optimizes the remaining Stat Points', async () => {
+  const result = await optimizeFromPaste(`Garchomp @ Focus Sash
+Ability: Rough Skin
+Level: 50
+- Swords Dance
+- Earthquake
+- Rock Tomb
+- Stealth Rock`, {
+    naturePolicy: 'neutral',
+    megaPolicy: 'never',
+    speedMode: 'fixed',
+    speedPoints: 20,
+    coarseTopK: 60,
+    finalTopK: 5,
+    statsProvider: async () => ({
+      info: { format: 'gen9championsbssregma', month: 'fixture' },
+      data: {
+        'Flutter Mane': {
+          usage: 45,
+          Abilities: { 'Protosynthesis': 100 },
+          Items: { 'Booster Energy': 100 },
+          Spreads: { 'Timid:0/0/0/32/0/32': 100 },
+          Moves: { 'Moonblast': 80, 'Shadow Ball': 70 }
+        },
+        Dragonite: {
+          usage: 55,
+          Abilities: { Multiscale: 100 },
+          Items: { 'Choice Band': 100 },
+          Spreads: { 'Jolly:0/32/0/0/2/32': 100 },
+          Moves: { 'Extreme Speed': 80, Earthquake: 50 }
+        }
+      }
+    })
+  });
+
+  assert.equal(result.speedPolicy.mode, 'fixed');
+  assert.equal(result.speedPolicy.points, 20);
+  assert.equal(result.results.length, 5);
+  assert.ok(result.results.every((row) => row.statPoints.spe === 20));
+  assert.ok(result.results.every((row) => row.statPointTotal <= 66));
+  assert.match(result.outputPaste, /20 Spe/);
+  assert.match(result.explanations.join('\n'), /Speed fixed: Spe 20/);
+});
+
+test('pasted Spe Stat Points automatically become the speed-first target', async () => {
+  const result = await optimizeFromPaste(`Garchomp @ Focus Sash
+Ability: Rough Skin
+Level: 50
+EVs: 15 Spe
+- Swords Dance
+- Earthquake
+- Rock Tomb
+- Stealth Rock`, {
+    naturePolicy: 'neutral',
+    megaPolicy: 'never',
+    coarseTopK: 60,
+    finalTopK: 5,
+    statsProvider: async () => ({
+      info: { format: 'gen9championsbssregma', month: 'fixture' },
+      data: {
+        'Flutter Mane': {
+          usage: 45,
+          Abilities: { Protosynthesis: 100 },
+          Items: { 'Booster Energy': 70, Other: 30 },
+          Spreads: { 'Timid:0/0/0/32/0/32': 70, Other: 30 },
+          Moves: { 'Moonblast': 80, 'Shadow Ball': 70, Other: 10 }
+        },
+        Dragonite: {
+          usage: 55,
+          Abilities: { Multiscale: 100 },
+          Items: { 'Choice Band': 40, Other: 60 },
+          Spreads: { 'Jolly:0/32/0/0/2/32': 80, Other: 20 },
+          Moves: { 'Extreme Speed': 80, Earthquake: 50, Other: 10 }
+        }
+      }
+    })
+  });
+
+  assert.equal(result.speedPolicy.mode, 'fixed');
+  assert.equal(result.speedPolicy.points, 15);
+  assert.equal(result.speedPolicy.source, 'paste');
+  assert.ok(result.results.every((row) => row.statPoints.spe === 15));
+  assert.match(result.explanations.join('\n'), /Speed fixed: Spe 15 from paste/);
+});
+
+test('pasted EVs without Spe leave speed optimization global instead of forcing Spe 0', async () => {
+  const result = await optimizeFromPaste(`Garchomp @ Focus Sash
+Ability: Rough Skin
+Level: 50
+EVs: 15 Atk
+- Swords Dance
+- Earthquake
+- Rock Tomb
+- Stealth Rock`, {
+    naturePolicy: 'neutral',
+    megaPolicy: 'never',
+    coarseTopK: 60,
+    finalTopK: 5,
+    statsProvider: async () => ({
+      info: { format: 'gen9championsbssregma', month: 'fixture' },
+      data: {
+        'Flutter Mane': {
+          usage: 100,
+          Abilities: { Protosynthesis: 100 },
+          Items: { 'Booster Energy': 100 },
+          Spreads: { 'Timid:0/0/0/32/0/32': 100 },
+          Moves: { 'Moonblast': 80, 'Shadow Ball': 70 }
+        }
+      }
+    })
+  });
+
+  assert.equal(result.speedPolicy.mode, 'global');
+  assert.equal(result.speedPolicy.points, null);
+  assert.equal(result.speedPolicy.source, 'search');
+  assert.doesNotMatch(result.explanations.join('\n'), /Speed fixed/);
+});
+
 test('mixed attackers return legal results without falling back to six-dimensional brute force', async () => {
   const result = await optimizeFromPaste(`Infernape @ Life Orb
 Ability: Blaze

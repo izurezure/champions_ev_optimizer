@@ -23,6 +23,8 @@ const DEFAULTS = {
   naturePolicy: 'fixed',
   excludeOther: true,
   setupBoost: 0,
+  speedMode: 'global',
+  speedPoints: null,
   coarseTopK: 300,
   finalTopK: 20,
   sampler: {
@@ -37,8 +39,9 @@ const DEFAULTS = {
 };
 
 export async function optimizeFromPaste(paste, options = {}) {
-  const config = validateConfig(mergeConfig(DEFAULTS, options), { defaults: DEFAULTS, formats: FORMATS });
+  let config = validateConfig(mergeConfig(DEFAULTS, options), { defaults: DEFAULTS, formats: FORMATS });
   const parsed = parsePaste(paste);
+  config = applyPasteSpeedConfig(config, parsed);
   const statsResult = await getStatsPayload(config);
   const chaosData = statsResult.payload ?? statsResult;
   const input = {
@@ -68,11 +71,25 @@ export async function optimizeFromPaste(paste, options = {}) {
     attackProfile,
     opponents: opponents.length,
     megaAssumption: best.megaAssumption,
+    speedPolicy: { mode: config.speedMode, points: config.speedPoints, source: config.speedSource },
     results,
     explanations,
     outputPaste: renderPaste(input, results[0]),
     statsLog: statsResult.log ?? []
   };
+}
+
+function applyPasteSpeedConfig(config, parsed) {
+  if (config.speedMode === 'fixed') return { ...config, speedSource: 'config' };
+  if (parsed.statPointInputs?.spe) {
+    return {
+      ...config,
+      speedMode: 'fixed',
+      speedPoints: parsed.statPoints.spe,
+      speedSource: 'paste'
+    };
+  }
+  return { ...config, speedSource: 'search' };
 }
 
 function evaluateVariant(set, opponents, attackProfile, config) {
@@ -86,7 +103,7 @@ function evaluateVariant(set, opponents, attackProfile, config) {
 
   for (const nature of natures) {
     const calculateCandidateStats = makeStatCalculator(set.species, nature);
-    for (const statPoints of legalAllocations(attackProfile)) {
+    for (const statPoints of legalAllocations(attackProfile, config)) {
       const stats = calculateCandidateStats(statPoints);
       const self = makeSelf(set, stats);
       const p = priority > 0 ? estimateSpeedWinProbability(self, opponents, priority) : estimateCoarseP(self.speed);
@@ -150,18 +167,22 @@ function natureCandidates(set, policy) {
   return [set.nature || 'Serious'];
 }
 
-function legalAllocations(profile) {
-  if (profile.primaryCategory === 'defensive') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
-  if (profile.primaryCategory === 'utility') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
-  if (profile.primaryCategory === 'physical') return legalAllocationIterator(['hp', 'atk', 'def', 'spd', 'spe']);
-  if (profile.primaryCategory === 'special') return legalAllocationIterator(['hp', 'def', 'spa', 'spd', 'spe']);
-  if (profile.primaryCategory === 'status') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
-  return mixedAllocationIterator();
+function legalAllocations(profile, config = {}) {
+  if (profile.primaryCategory === 'defensive') return legalAllocationIterator(['hp', 'def', 'spd', 'spe'], config);
+  if (profile.primaryCategory === 'utility') return legalAllocationIterator(['hp', 'def', 'spd', 'spe'], config);
+  if (profile.primaryCategory === 'physical') return legalAllocationIterator(['hp', 'atk', 'def', 'spd', 'spe'], config);
+  if (profile.primaryCategory === 'special') return legalAllocationIterator(['hp', 'def', 'spa', 'spd', 'spe'], config);
+  if (profile.primaryCategory === 'status') return legalAllocationIterator(['hp', 'def', 'spd', 'spe'], config);
+  return mixedAllocationIterator(config);
 }
 
-function* legalAllocationIterator(activeStats) {
+function* legalAllocationIterator(activeStats, config = {}) {
   const points = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
-  yield* allocate(activeStats, 0, 66, points);
+  const fixedSpe = fixedSpeedPoints(config);
+  const stats = fixedSpe === null ? activeStats : activeStats.filter((stat) => stat !== 'spe');
+  const remaining = fixedSpe === null ? 66 : 66 - fixedSpe;
+  if (fixedSpe !== null) points.spe = fixedSpe;
+  yield* allocate(stats, 0, remaining, points);
 }
 
 function* allocate(activeStats, index, remaining, points) {
@@ -183,16 +204,23 @@ function* allocate(activeStats, index, remaining, points) {
   points[stat] = 0;
 }
 
-function* mixedAllocationIterator() {
+function* mixedAllocationIterator(config = {}) {
   const offenseGrid = [0, 8, 16, 24, 32];
+  const fixedSpe = fixedSpeedPoints(config);
+  const totalBudget = fixedSpe === null ? 66 : 66 - fixedSpe;
+  const bulkStats = fixedSpe === null ? ['hp', 'def', 'spd', 'spe'] : ['hp', 'def', 'spd'];
   for (const atk of offenseGrid) {
     for (const spa of offenseGrid) {
-      const remaining = 66 - atk - spa;
+      const remaining = totalBudget - atk - spa;
       if (remaining < 0) continue;
-      const points = { hp: 0, atk, def: 0, spa, spd: 0, spe: 0 };
-      yield* allocate(['hp', 'def', 'spd', 'spe'], 0, remaining, points);
+      const points = { hp: 0, atk, def: 0, spa, spd: 0, spe: fixedSpe ?? 0 };
+      yield* allocate(bulkStats, 0, remaining, points);
     }
   }
+}
+
+function fixedSpeedPoints(config = {}) {
+  return config.speedMode === 'fixed' ? Number(config.speedPoints) : null;
 }
 
 function coarseDamage(stats, profile, set, setupBoost) {
@@ -413,9 +441,13 @@ function explainCandidate(candidate, profile, set) {
   return priorities.join(', ');
 }
 
-function buildExplanations({ input, attackProfile, result, statsResult }) {
+function buildExplanations({ input, attackProfile, result, statsResult, config }) {
   const explanations = [];
   explanations.push(`Attack profile: ${attackProfile.primaryCategory}`);
+  if (config?.speedMode === 'fixed') {
+    const source = config.speedSource === 'paste' ? ' from paste' : '';
+    explanations.push(`Speed fixed: Spe ${config.speedPoints}${source}.`);
+  }
   const roleNames = attackProfile.roles?.map((role) => role.id) ?? [];
   if (roleNames.length) explanations.push(`Move roles: ${roleNames.join(', ')}`);
   if (attackProfile.setup) explanations.push('Setup moves slightly increase durability/action value in the MVP model.');

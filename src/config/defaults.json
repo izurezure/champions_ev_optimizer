@@ -6,6 +6,8 @@
   "naturePolicy": "fixed",
   "excludeOther": true,
   "setupBoost": 0,
+  "speedMode": "global",
+  "speedPoints": null,
   "coarseTopK": 300,
   "finalTopK": 20,
   "sampler": {

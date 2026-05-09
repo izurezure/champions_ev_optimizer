@@ -25,5 +25,20 @@ Jolly Nature
 - Earthquake`);
 
   assert.deepEqual(set.statPoints, { hp: 2, atk: 32, def: 0, spa: 0, spd: 0, spe: 32 });
+  assert.deepEqual(set.statPointInputs, { hp: true, atk: true, def: false, spa: false, spd: false, spe: true });
   assert.equal(set.nature, 'Jolly');
+});
+
+test('paste parser tracks whether Spe was explicitly entered', () => {
+  const withSpeed = parsePaste(`Garchomp @ Focus Sash
+EVs: 15 S
+- Earthquake`);
+  const withoutSpeed = parsePaste(`Garchomp @ Focus Sash
+EVs: 15 Atk
+- Earthquake`);
+
+  assert.equal(withSpeed.statPoints.spe, 15);
+  assert.equal(withSpeed.statPointInputs.spe, true);
+  assert.equal(withoutSpeed.statPoints.spe, 0);
+  assert.equal(withoutSpeed.statPointInputs.spe, false);
 });

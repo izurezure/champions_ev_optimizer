@@ -67,6 +67,12 @@ function parseArgs(argv) {
     } else if (arg === '--setup') {
       options.setupBoost = next;
       i += 1;
+    } else if (arg === '--speed') {
+      options.speedMode = next;
+      i += 1;
+    } else if (arg === '--spe') {
+      options.speedPoints = next;
+      i += 1;
     } else if (arg === '--help' || arg === '-h') {
       options.help = true;
     }
@@ -86,6 +92,8 @@ Options:
   --nature  fixed, neutral, or optimize
   --mega    auto, always, or never
   --setup   0, 1, or 2
+  --speed   global or fixed
+  --spe     Spe Stat Points for --speed fixed, 0..32
   --file    input paste file
 `);
 }

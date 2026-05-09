@@ -2,38 +2,47 @@
 
 Pokemon Champions の Stat Point 配分をローカルで最適化するツールです。
 
-Pokemon Showdown paste を入力として受け取り、Smogon の
-`[Gen 9 Champions] BSS Reg M-A` または `[Gen 9 Champions] OU` の chaos 統計を更新・取得し、
-選択formatの相手メタ母集団を生成したうえで、`champions_ev_optimizer_spec.md` の総合能力指数に基づいて合法な Champions Stat Point 配分を順位付けします。
+Pokemon Showdown の paste を入力として受け取り、Smogon chaos stats の
+`[Gen 9 Champions] BSS Reg M-A` または `[Gen 9 Champions] OU` を取得し、
+選択したフォーマットの相手サンプル集合を作ったうえで、
+`champions_ev_optimizer_spec.md` の総合能力指数 `Z` に基づいて合法な
+Champions Stat Point 配分を順位付けします。
 
-既定のREADMEは英語版の [README.md](README.md) です。
+英語版 README は [README.md](README.md) です。
 
 ## 主な機能
 
-- `127.0.0.1` のみにバインドするローカルGUI。
-- 再現しやすいCLI実行。
-- Champions BSS Reg M-A と Champions OU のformat選択。
-- format、年月、レート帯、Mega policy、Nature policy、積みシナリオ、`Other` 除外の共通validation。
-- Pokemon Showdown paste から、種族、持ち物、特性、レベル、性格、技、配分行を解析。
-- Champions Stat Point を直接処理:
-  - 各ステータス: `0..32`
+- `127.0.0.1` のみに bind するローカル GUI。
+- 再現しやすい CLI 実行。
+- Champions BSS Reg M-A と Champions OU のフォーマット選択。
+- format、month、rating、Mega policy、nature policy、setup scenario、
+  `Other` 除外の共通 validation。
+- Pokemon Showdown paste から species、item、ability、level、nature、
+  moves、貼り付け済み Stat Point または EV 風の配分行を解析。
+- Champions Stat Point の直接処理。
+  - 各 stat: `0..32`
   - 合計: `0..66`
-  - 対象: `HP / Atk / Def / SpA / SpD / Spe`
-- Smogon chaos JSON の更新確認、取得、format別gzip/JSONキャッシュ。
-- `Other` を除外した条件付き割合への正規化。
+  - 対象 stat: `HP / Atk / Def / SpA / SpD / Spe`
+- Smogon chaos JSON の更新確認と、format 別 gzip/JSON ローカル cache fallback。
+- `Other` 除外と条件付き割合の再正規化。
 - 使用率、特性、持ち物、配分、技から相手サンプルを生成。
-- 先攻確率 `P`、与ダメージまたはロール圧力 `D_out`、耐久価値 `V`、相手HP逆数 `n`、説明用係数 `m` を出力。
-- Mega policy: `auto`, `always`, `never`。
-- Z技、ダイマックス、テラスタル用の拡張stub。
-- 攻撃型、混合型、OU、耐久ユーティリティ型に対する回帰テスト。
+- 先攻確率 `P`、与ダメージまたはロール圧力 `D_out`、耐久行動価値 `V`、
+  相手 HP 逆数 `n`、説明用係数 `m` を出力。
+- 素早さを先に固定し、残りの Stat Point で `Z` を最大化する speed-first optimization。
+- paste 内の `EVs`、`SP`、`Stat Points` 行に `Spe` または `S` が明示されていれば、
+  その値を固定 Spe 目標として自動採用。Spe が省略されている場合は、Spe 0 固定ではなく
+  未入力として通常探索。
+- Mega Evolution policy: `auto`、`always`、`never`。
+- Z-Move、Dynamax、Terastal 用の plugin stub。
+- offensive、mixed、OU、defensive utility profile の回帰テスト。
 
 ## 必要環境
 
 - Node.js 20 以上。
 - npm。
-- 初回取得または統計更新時のネットワーク接続。
+- 初回取得または Smogon stats 更新時のネットワーク接続。
 
-外部公開用のサーバーはありません。計算とキャッシュはローカルマシン内に留まります。
+外部公開用のバックエンドはありません。計算と cache はローカルマシン上に残ります。
 
 ## クイックスタート
 
@@ -42,7 +51,7 @@ npm install
 npm start
 ```
 
-表示されたローカルURLを開きます。
+表示されたローカル URL を開きます。
 
 ```text
 http://127.0.0.1:3000
@@ -55,39 +64,42 @@ npm.cmd install
 npm.cmd start
 ```
 
-## GUIの使い方
+## GUI の使い方
 
-1. 入力欄に Pokemon Showdown paste を貼り付けます。
-2. BSSまたはOU、年月、レート帯、Mega policy、Nature policy、積みシナリオを選びます。
+1. 入力欄に Pokemon Showdown set を貼り付けます。
+2. BSS または OU、month、rating、Mega policy、nature policy、setup scenario、
+   必要なら固定 Spe 目標を選びます。
 3. `Calculate` を押します。
 4. 結果テーブルと生成された Showdown paste を確認します。
 
-対応formatは次です。
+対応フォーマット:
 
 ```text
 gen9championsbssregma
 gen9championsou
 ```
 
-既定formatは引き続き `gen9championsbssregma` です。
+既定フォーマットは `gen9championsbssregma` です。
 
-Smogon年月の既定値は `latest` です。Smogon stats index を確認し、選択formatとレート帯の統計が存在する最新月を使います。ネットワーク更新に失敗し、対応するキャッシュが存在する場合は、警告を出したうえでキャッシュを使用します。
+Smogon month の既定値は `latest` です。Smogon stats index を確認し、選択フォーマットと
+rating の stats が存在する最新月を使います。ネットワーク更新に失敗し、対応する cache が
+ある場合は、警告を出したうえで cache を使用します。
 
-## CLIの使い方
+## CLI の使い方
 
-標準入力からpasteを渡します。
+標準入力から paste を渡します。
 
 ```sh
 node src/cli.js --format gen9championsbssregma --month latest --rating 1500 < set.txt
 ```
 
-Champions OUを既知の年月で実行します。
+既知の月で Champions OU を実行します。
 
 ```sh
 node src/cli.js --format gen9championsou --month 2026-04 --rating 1500 < set.txt
 ```
 
-ファイルからpasteを渡します。
+ファイルから paste を渡します。
 
 ```sh
 node src/cli.js --file set.txt --month 2026-04 --rating 1500 --nature optimize --mega never
@@ -102,6 +114,14 @@ node src/cli.js --file set.txt --month 2026-04 --rating 1500 --nature optimize -
 --nature  fixed, neutral, optimize
 --mega    auto, always, never
 --setup   0, 1, 2
+--speed   global または fixed
+--spe     --speed fixed で使う Spe Stat Points, 0..32
+```
+
+素早さを先に固定してから、残り Stat Point で `Z` を最大化する例:
+
+```sh
+node src/cli.js --speed fixed --spe 20 < set.txt
 ```
 
 ## 入力例
@@ -116,14 +136,30 @@ Level: 50
 - Stealth Rock
 ```
 
+paste 内で Spe を指定した場合は、自動的に speed-first optimization の固定 Spe 目標になります。
+
+```text
+Garchomp @ Focus Sash
+Ability: Rough Skin
+Level: 50
+EVs: 15 Spe
+- Swords Dance
+- Earthquake
+- Rock Tomb
+- Stealth Rock
+```
+
+`EVs: 15 S` も同じ意味です。一方、`EVs: 15 Atk` のように Spe/S がない場合、Spe は
+0 固定ではなく未入力として扱われ、通常どおり探索されます。
+
 ## 出力
 
-上位配分について、次の列を返します。
+上位候補について、次の列を返します。
 
 - rank
 - Stat Points
-- Nature
-- Stats
+- nature
+- final stats
 - `Z`
 - `P`
 - `V`
@@ -132,7 +168,7 @@ Level: 50
 - `n`
 - explanation
 
-さらに、最上位配分を反映した Showdown paste を生成します。
+さらに、最上位候補を反映した Showdown paste を生成します。
 
 ```text
 Garchomp @ Focus Sash
@@ -155,32 +191,44 @@ Z = D_out * (V + P) / { 1 + n * D_out * (1/2 - P) }
 
 各値の意味:
 
-- `D_out`: サンプル相手への重み付き圧力。純粋な攻撃型では期待与ダメージ、ユーティリティ型では状態異常、設置技、回復、除去、壁、対面操作などの技ベース圧力も含みます。
+- `D_out`: サンプル相手への重み付き与圧力。純粋な攻撃型では期待ダメージ、utility 型では
+  状態異常、設置技、回復、除去、壁、対面操作などの技ベース圧力も含めます。
 - `P`: 重み付き先攻確率。
 - `V`: 重み付き耐久・行動価値。
 - `n`: `E[1 / opponentHP]`。
 - `m`: `D_out / offensiveStat` として出す説明用係数。
 
-実装は、隠れた手作業調整よりも、検証可能で決定的なMVP挙動を優先しています。プロファイルはポケモン名ではなく技から推定します。物理型・特殊型では支配劣位の配分を除外します。耐久型・ユーティリティ型では耐久寄りの配分を探索し、混合型では攻撃2軸を代表点に絞り、残りステータスを厳密配分することで、任意paste入力でも応答性を保ちます。
+実装では、隠れた手作業調整よりも、検証可能で決定的な MVP 挙動を優先しています。
+profile はポケモン名ではなく技から推定します。物理型・特殊型では支配される配分を枝刈りし、
+defensive・utility profile では耐久寄りの配分を探索します。mixed attacker では攻撃軸を
+bounded grid にし、残り stat を厳密配分することで、任意の paste 入力でも応答性を保ちます。
 
-## Smogonデータとキャッシュ
+`--speed fixed --spe N` を使うと、全ての候補が `Spe N` を維持します。そのうえで、残り予算を
+ロールに応じた攻撃・耐久 stat に配分し、説明欄にも固定 Spe の前提を出します。同じ挙動は
+`EVs: 15 Spe` や `EVs: 15 S` のような paste 入力からも推論されます。Spe を含まない EV 行は、
+通常の global search のままです。
 
-Smogon統計は次から取得します。
+## Smogon データと cache
+
+Smogon stats は次から取得します。
 
 ```text
 https://www.smogon.com/stats/
 ```
 
-キャッシュは次に保存されます。
+cache は次に保存されます。
 
 ```text
 src/stats/cache/
 ```
 
-キャッシュファイルは年月、canonical Smogon format id、レート帯ごとに分離されます。例: `2026-04-gen9championsou-1500.json.gz`。
-これらはgit管理対象外です。削除しても問題ありません。次回実行時に再取得を試みます。
+cache ファイルは、month、canonical Smogon format id、rating ごとに分かれます。
+例: `2026-04-gen9championsou-1500.json.gz`。これらは git 管理対象外です。
+削除しても問題ありません。次回実行時に再取得を試みます。
 
-OUのcanonical idは `gen9championsou` です。綴り違いの `gen9champoinsou` へ黙ってfallbackしません。canonical統計が対象年月に存在しない場合、その年月は選択formatで利用不可として扱います。
+OU の canonical id は `gen9championsou` です。typo の `gen9champoinsou` には黙って
+fallback しません。対象月に canonical stats が存在しない場合、その月は選択フォーマットで
+利用不可として扱います。
 
 ## テスト
 
@@ -191,18 +239,20 @@ npm test
 テスト対象:
 
 - Showdown paste 解析。
-- Champions Stat Point 制約と実数値計算式。
-- `Other` 除外正規化。
-- Smogon chaos URL生成、format-aware `latest`、キャッシュfallback、BSS/OU cache分離。
-- format、年月、レート帯、unsupported format metadataのconfig validation。
-- GUIでformat変更時のrating同期。
+- Champions Stat Point 制約と stat 計算式。
+- `Other` 除外の再正規化。
+- Smogon chaos URL 生成、format-aware `latest`、cache fallback、BSS/OU cache 分離。
+- format、month、rating、unsupported format metadata の config validation。
+- 固定 Spe validation と speed-first optimization 挙動。
+- paste から推論される Spe 目標と、Spe 未記入を未入力として扱うケース。
+- GUI の format 変更時 rating 同期。
 - 先攻確率。
 - 総合能力指数の式。
-- Mega plugin。
-- Garchomp回帰。
-- Champions OU回帰。
-- 混合アタッカーのbounded optimization。
-- 技ベースのロール分類と耐久ユーティリティ型の回帰。
+- Mega plugin 挙動。
+- Garchomp 回帰挙動。
+- Champions OU 回帰挙動。
+- mixed attacker の bounded optimization。
+- move-based role profile coverage と defensive utility 回帰挙動。
 
 ## ディレクトリ構成
 
@@ -219,26 +269,30 @@ src/
 test/
 ```
 
-## 現時点の制限
+## 現在の制限
 
-- ダメージ計算はMVP近似です。Pokemonデータ、技威力、タイプ相性、STAB、一部持ち物、一部特性を使いますが、完全なバトルシミュレータではありません。
-- 天候、フィールド、場の状態、揮発状態、チーム単位の制約は限定的です。
-- 単体pasteから、チーム内のメガシンカ権の使用者までは確定できません。別のメガ枠がいる場合は `--mega never` でも比較してください。
-- OUの完全な合法性、banlist検証、6匹単位のチーム最適化は今回のMVP対象外です。OUでは、選択したOUのSmogon相手母集団を使い、BSSと同じ単体ポケモン用 Champions Stat Point optimizer で評価します。
+- ダメージ計算は MVP 近似です。Pokemon data、技威力、タイプ相性、STAB、一部持ち物、
+  一部特性を使いますが、完全なバトルシミュレータではありません。
+- 天候、フィールド、場の状態、未発動状態、チーム単位制約は限定的です。
+- 単体 paste から、チーム内で誰が Mega Evolution 権を使うかまでは確定できません。
+  別の Mega 枠がいる場合は `--mega never` でも比較してください。
+- OU の完全な合法性、banlist 検証、6体単位のチーム最適化は今回の MVP 対象外です。
+  OU では、選択した OU Smogon 相手母集団を使い、BSS と同じ単体用 Champions Stat Point
+  optimizer で評価します。
 
 ## トラブルシューティング
 
-PowerShellでnpmがブロックされる場合:
+PowerShell で npm がブロックされる場合:
 
 ```sh
 npm.cmd install
 npm.cmd start
 ```
 
-Smogon更新に失敗する場合、存在が分かっている年月を指定して一度実行してください。
+Smogon 更新に失敗する場合は、存在することが分かっている特定月を指定して一度実行してください。
 
 ```sh
 node src/cli.js --format gen9championsou --month 2026-04 --rating 1500 < set.txt
 ```
 
-キャッシュが古い場合は、`src/stats/cache/` を削除して再実行してください。
+cache が古い場合は、`src/stats/cache/` を削除して再実行してください。

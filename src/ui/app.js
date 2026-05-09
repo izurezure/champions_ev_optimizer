@@ -1,7 +1,7 @@
 import { formatLabelForId, ratingStateForFormat } from './formatOptions.js';
 
 const $ = (selector) => document.querySelector(selector);
-const fields = ['format', 'month', 'rating', 'megaPolicy', 'naturePolicy', 'setupBoost', 'excludeOther'];
+const fields = ['format', 'month', 'rating', 'megaPolicy', 'naturePolicy', 'setupBoost', 'speedMode', 'speedPoints', 'excludeOther'];
 
 let config = null;
 
@@ -17,7 +17,12 @@ async function init() {
   });
   $('#rating').addEventListener('change', calculate);
   $('#month').addEventListener('change', calculate);
+  $('#speedMode').addEventListener('change', () => {
+    syncSpeedControls();
+    calculate();
+  });
   log(config.log.join('\n'));
+  syncSpeedControls();
   await calculate();
 }
 
@@ -29,6 +34,9 @@ function fillFormats(formats, defaults) {
   $('#megaPolicy').value = defaults.megaPolicy;
   $('#naturePolicy').value = defaults.naturePolicy;
   $('#setupBoost').value = String(defaults.setupBoost);
+  $('#speedMode').value = defaults.speedMode;
+  $('#speedPoints').value = defaults.speedPoints ?? '';
+  syncSpeedControls();
 }
 
 function syncRatingOptions(formatId, currentRating) {
@@ -44,6 +52,7 @@ async function calculate() {
     const payload = Object.fromEntries(fields.map((id) => [id, readField(id)]));
     payload.paste = $('#paste').value;
     payload.setupBoost = Number(payload.setupBoost);
+    if (payload.speedPoints !== '') payload.speedPoints = Number(payload.speedPoints);
     const result = await fetchJson('/api/optimize', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -57,6 +66,13 @@ async function calculate() {
     $('#calculate').disabled = false;
     $('#calculate').textContent = 'Calculate';
   }
+}
+
+function syncSpeedControls() {
+  const fixed = $('#speedMode').value === 'fixed';
+  $('#speedPoints').disabled = !fixed;
+  $('#speedPoints').required = fixed;
+  if (!fixed) $('#speedPoints').value = '';
 }
 
 function render(result) {
