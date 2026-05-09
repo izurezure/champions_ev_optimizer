@@ -20,32 +20,179 @@ const TYPE_BOOST_ITEMS = {
   twistedspoon: 'Psychic'
 };
 
+const ROLE_MOVE_GROUPS = [
+  { id: 'stealthRock', moves: ['stealthrock'] },
+  { id: 'spikes', moves: ['spikes', 'ceaselessedge'] },
+  { id: 'toxicSpikes', moves: ['toxicspikes'] },
+  { id: 'stickyWeb', moves: ['stickyweb'] },
+  { id: 'hazardRemoval', moves: ['defog', 'rapidspin', 'mortalspin'] },
+  { id: 'tidyUp', moves: ['tidyup'] },
+  { id: 'teamHealing', moves: ['healingwish', 'lunardance'] },
+  { id: 'wish', moves: ['wish'] },
+  { id: 'screens', moves: ['reflect', 'lightscreen', 'auroraveil'] },
+  { id: 'itemDisruption', moves: ['knockoff'] },
+  { id: 'lockPunish', moves: ['encore'] },
+  { id: 'antiSetup', moves: ['taunt', 'haze', 'clearsmog', 'roar', 'whirlwind', 'dragontail', 'circlethrow'] },
+  { id: 'itemTrick', moves: ['trick', 'switcheroo'] },
+  { id: 'physicalSetup', moves: ['swordsdance', 'bulkup', 'dragondance', 'bellydrum', 'curse'] },
+  { id: 'specialSetup', moves: ['nastyplot', 'calmmind', 'quiverdance'] },
+  { id: 'speedSetup', moves: ['agility', 'rockpolish', 'dragondance', 'shellsmash', 'quiverdance', 'shiftgear'] },
+  { id: 'defenseSetup', moves: ['irondefense', 'acidarmor', 'shelter', 'cottonguard', 'cosmicpower', 'bulkup', 'curse'] },
+  { id: 'pivot', moves: ['uturn', 'voltswitch', 'flipturn', 'chillyreception', 'partingshot'] },
+  {
+    id: 'recoveryWall',
+    moves: [
+      'recover',
+      'roost',
+      'slackoff',
+      'softboiled',
+      'moonlight',
+      'morningsun',
+      'synthesis',
+      'shoreup',
+      'strengthsap',
+      'rest',
+      'painsplit',
+      'milkdrink',
+      'healorder'
+    ]
+  },
+  {
+    id: 'statusPressure',
+    moves: [
+      'toxic',
+      'willowisp',
+      'thunderwave',
+      'leechseed',
+      'glare',
+      'nuzzle',
+      'yawn',
+      'spore',
+      'sleeppowder',
+      'stunspore',
+      'toxicthread'
+    ]
+  }
+];
+
+const HAZARD_ROLE_IDS = ['stealthRock', 'spikes', 'toxicSpikes', 'stickyWeb'];
+const REMOVAL_ROLE_IDS = ['hazardRemoval', 'tidyUp'];
+const SETUP_ROLE_IDS = ['physicalSetup', 'specialSetup', 'speedSetup', 'defenseSetup'];
+
 export function identifyAttackProfile(moves = []) {
   let physical = 0;
   let special = 0;
-  let setup = 0;
-  let hazard = 0;
   const damagingMoves = [];
+  const roles = new Map();
+  const setupMoves = new Set();
 
   for (const name of moves) {
     const move = getMove(name);
     if (!move) continue;
+    const id = toId(move.name);
+
     if (move.basePower > 0 && move.category !== 'Status') {
       damagingMoves.push(displayMoveName(name));
       if (move.category === 'Physical') physical += move.basePower;
       if (move.category === 'Special') special += move.basePower;
-    } else {
-      const id = toId(move.name);
-      if (['swordsdance', 'nastyplot', 'dragondance', 'calmmind', 'bulkup', 'quiverdance'].includes(id)) setup += 1;
-      if (['stealthrock', 'spikes', 'toxicspikes', 'stickyweb'].includes(id)) hazard += 1;
     }
+
+    for (const group of ROLE_MOVE_GROUPS) {
+      if (group.moves.includes(id)) {
+        addRole(roles, group.id, move.name);
+        if (SETUP_ROLE_IDS.includes(group.id)) setupMoves.add(id);
+      }
+    }
+    if (move.priority > 0 && move.category !== 'Status') addRole(roles, 'priority', move.name);
   }
 
+  const roleMoveCount = (id) => roles.get(id)?.size ?? 0;
+  const roleSetCount = (ids) => ids.reduce((sum, id) => sum + roleMoveCount(id), 0);
+  const hazard = roleSetCount(HAZARD_ROLE_IDS);
+  const setup = setupMoves.size;
+  const priority = roleMoveCount('priority');
+  const utility = {
+    hazards: hazard,
+    removal: roleSetCount(REMOVAL_ROLE_IDS),
+    screens: roleMoveCount('screens'),
+    itemDisruption: roleMoveCount('itemDisruption'),
+    lockPunish: roleMoveCount('lockPunish'),
+    antiSetup: roleMoveCount('antiSetup'),
+    itemTrick: roleMoveCount('itemTrick'),
+    pivot: roleMoveCount('pivot'),
+    teamHealing: roleMoveCount('teamHealing'),
+    wish: roleMoveCount('wish')
+  };
+  const defensive = {
+    recovery: roleMoveCount('recoveryWall'),
+    statusPressure: roleMoveCount('statusPressure'),
+    defenseBoost: roleMoveCount('defenseSetup'),
+    antiSetup: utility.antiSetup,
+    screens: utility.screens,
+    wish: utility.wish
+  };
+  const offensive = {
+    physicalPower: physical,
+    specialPower: special,
+    priority,
+    setup,
+    mixed: Boolean(physical && special && Math.min(physical, special) / Math.max(physical, special) > 0.35)
+  };
+  const scores = scoreRoles({ physical, special, offensive, utility, defensive });
   let primaryCategory = 'status';
   if (physical || special) primaryCategory = physical >= special ? 'physical' : 'special';
-  if (physical && special && Math.min(physical, special) / Math.max(physical, special) > 0.35) primaryCategory = 'mixed';
+  if (offensive.mixed) primaryCategory = 'mixed';
+  primaryCategory = refinePrimaryCategory(primaryCategory, scores, Boolean(physical || special));
 
-  return { physical, special, setup, hazard, damagingMoves, primaryCategory };
+  return {
+    physical,
+    special,
+    setup,
+    hazard,
+    damagingMoves,
+    primaryCategory,
+    roles: [...roles.entries()].map(([id, sourceMoves]) => ({ id, sourceMoves: [...sourceMoves] })),
+    offensive,
+    utility,
+    defensive,
+    roleScores: scores
+  };
+}
+
+function addRole(roles, id, moveName) {
+  if (!roles.has(id)) roles.set(id, new Set());
+  roles.get(id).add(displayMoveName(moveName));
+}
+
+function scoreRoles({ physical, special, offensive, utility, defensive }) {
+  const offense = (physical + special) / 80 + offensive.setup * 0.45 + offensive.priority * 0.3;
+  const defense =
+    defensive.recovery * 2.2 +
+    defensive.statusPressure * 1.2 +
+    defensive.defenseBoost * 1.1 +
+    defensive.antiSetup * 0.6 +
+    defensive.screens * 0.5 +
+    defensive.wish * 0.9;
+  const support =
+    utility.hazards * 0.9 +
+    utility.removal * 0.9 +
+    utility.screens * 0.7 +
+    utility.itemDisruption * 0.5 +
+    utility.lockPunish * 0.7 +
+    utility.antiSetup * 0.7 +
+    utility.itemTrick * 0.6 +
+    utility.pivot * 0.5 +
+    utility.teamHealing * 0.8 +
+    utility.wish * 0.8;
+  return { offense, defense, utility: support };
+}
+
+function refinePrimaryCategory(category, scores, hasDamagingMove) {
+  if (scores.defense >= Math.max(2.8, scores.offense * 1.15)) return 'defensive';
+  if (!hasDamagingMove && scores.defense > 0) return 'defensive';
+  if (!hasDamagingMove && scores.utility > 0) return 'utility';
+  if (scores.utility >= Math.max(3.2, scores.offense * 1.5) && scores.defense < 1) return 'utility';
+  return category;
 }
 
 export function bestOutgoingDamage(attacker, defender, moves, options = {}) {

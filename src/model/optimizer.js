@@ -1,13 +1,19 @@
-import { allNatures, displayAbilityName, displayItemName, getMove, getSpecies, STAT_LABELS, STATS } from '../ps/dexAdapter.js';
+import { createRequire } from 'node:module';
+import { allNatures, displayAbilityName, displayItemName, getMove, getSpecies, STAT_LABELS, STATS, toId } from '../ps/dexAdapter.js';
 import { parsePaste } from '../ps/pasteParser.js';
 import { calculateStats, formatStatPoints, makeStatCalculator, sumStatPoints } from '../ps/statCalculator.js';
 import { buildOpponentSamples } from '../stats/opponentSampler.js';
 import { loadChaosStats } from '../stats/smogonClient.js';
+import { validateConfig } from '../config/validation.js';
 import { megaPlugin } from '../mechanics/mega.js';
 import { bestOutgoingDamage, identifyAttackProfile } from './damageEngine.js';
 import { estimateDurability, estimateN } from './durabilityModel.js';
-import { effectiveSpeed, estimateSpeedWinProbability } from './speedModel.js';
+import { effectiveSpeed, estimateSpeedWinProbability, SPEED_MIRROR_WEIGHT } from './speedModel.js';
 import { totalPowerIndex } from './totalPowerIndex.js';
+
+const require = createRequire(import.meta.url);
+const FORMATS = require('../config/formats.json');
+const P_EVAL_CAP = 0.995;
 
 const DEFAULTS = {
   format: 'gen9championsbssregma',
@@ -31,7 +37,7 @@ const DEFAULTS = {
 };
 
 export async function optimizeFromPaste(paste, options = {}) {
-  const config = mergeConfig(DEFAULTS, options);
+  const config = validateConfig(mergeConfig(DEFAULTS, options), { defaults: DEFAULTS, formats: FORMATS });
   const parsed = parsePaste(paste);
   const statsResult = await getStatsPayload(config);
   const chaosData = statsResult.payload ?? statsResult;
@@ -54,6 +60,7 @@ export async function optimizeFromPaste(paste, options = {}) {
   return {
     input,
     format: config.format,
+    formatLabel: config.formatLabel,
     month: statsResult.month ?? config.month,
     rating: config.rating,
     source: statsResult.source ?? (config.statsProvider ? 'provided' : 'network'),
@@ -74,7 +81,8 @@ function evaluateVariant(set, opponents, attackProfile, config) {
   const coarse = [];
   const coarseLimit = Math.max(config.coarseTopK * 4, config.coarseTopK);
   const estimateCoarseP = makeSpeedEstimator(opponents);
-  const priority = maxMovePriority(set.moves);
+  const priority = speedPriorityForProfile(set.moves, attackProfile);
+  const kP = speedValueCoefficient(attackProfile);
 
   for (const nature of natures) {
     const calculateCandidateStats = makeStatCalculator(set.species, nature);
@@ -82,9 +90,10 @@ function evaluateVariant(set, opponents, attackProfile, config) {
       const stats = calculateCandidateStats(statPoints);
       const self = makeSelf(set, stats);
       const p = priority > 0 ? estimateSpeedWinProbability(self, opponents, priority) : estimateCoarseP(self.speed);
+      const pEval = speedEvalProbability(p, kP);
       const dOut = coarseDamage(stats, attackProfile, set, config.setupBoost);
       const v = coarseDurability(stats, attackProfile, set);
-      const z = totalPowerIndex({ dOut, v, p, n });
+      const z = totalPowerIndex({ dOut, v, p: pEval, n });
       coarse.push({ statPoints, nature, stats, p, dOut, v, z });
       if (coarse.length > coarseLimit * 2) {
         coarse.sort((a, b) => b.z - a.z);
@@ -96,13 +105,15 @@ function evaluateVariant(set, opponents, attackProfile, config) {
   coarse.sort((a, b) => b.z - a.z);
   const fine = coarse.slice(0, config.coarseTopK).map((candidate) => {
     const self = makeSelf(set, candidate.stats);
-    const p = estimateSpeedWinProbability(self, opponents, maxMovePriority(set.moves));
-    const dOut = opponents.reduce((sum, opponent) => {
+    const p = estimateSpeedWinProbability(self, opponents, priority);
+    const pEval = speedEvalProbability(p, kP);
+    const rawDOut = opponents.reduce((sum, opponent) => {
       return sum + opponent.weight * bestOutgoingDamage(self, opponent, set.moves, { setupBoost: config.setupBoost }).damage;
     }, 0);
-    const v = estimateDurability(self, opponents) + attackProfile.setup * 0.15 + attackProfile.hazard * 0.1;
+    const dOut = effectiveOutgoingPressure(rawDOut, candidate.stats, attackProfile);
+    const v = estimateDurability(self, opponents) + roleDurabilityBonus(self, attackProfile);
     const offensiveStat = dominantOffensiveStat(candidate.stats, attackProfile);
-    const z = totalPowerIndex({ dOut, v, p, n });
+    const z = totalPowerIndex({ dOut, v, p: pEval, n });
     return {
       ...candidate,
       statPointTotal: sumStatPoints(candidate.statPoints),
@@ -134,12 +145,14 @@ function makeSelf(set, stats) {
 function natureCandidates(set, policy) {
   if (policy === 'neutral') return ['Serious'];
   if (policy === 'fixed' && set.nature) return [set.nature];
-  if (policy === 'fixed' && !set.nature) return allNatures();
+  if (policy === 'fixed' && !set.nature) return ['Serious'];
   if (policy === 'optimize') return allNatures();
   return [set.nature || 'Serious'];
 }
 
 function legalAllocations(profile) {
+  if (profile.primaryCategory === 'defensive') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
+  if (profile.primaryCategory === 'utility') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
   if (profile.primaryCategory === 'physical') return legalAllocationIterator(['hp', 'atk', 'def', 'spd', 'spe']);
   if (profile.primaryCategory === 'special') return legalAllocationIterator(['hp', 'def', 'spa', 'spd', 'spe']);
   if (profile.primaryCategory === 'status') return legalAllocationIterator(['hp', 'def', 'spd', 'spe']);
@@ -186,17 +199,75 @@ function coarseDamage(stats, profile, set, setupBoost) {
   const totalPower = Math.max(40, profile.physical + profile.special);
   const setupPhysical = setupBoost > 0 && set.moves.some((move) => /swords dance|dragon dance|bulk up/i.test(move)) ? 2 : 1;
   const setupSpecial = setupBoost > 0 && set.moves.some((move) => /nasty plot|calm mind|quiver dance/i.test(move)) ? 2 : 1;
-  if (profile.primaryCategory === 'physical') return stats.atk * setupPhysical * totalPower / 260;
-  if (profile.primaryCategory === 'special') return stats.spa * setupSpecial * totalPower / 260;
-  if (profile.primaryCategory === 'mixed') return (stats.atk * setupPhysical * profile.physical + stats.spa * setupSpecial * profile.special) / 260;
-  return Math.max(stats.atk, stats.spa) * 0.2;
+  let raw = Math.max(stats.atk, stats.spa) * 0.2;
+  if (profile.primaryCategory === 'physical') raw = stats.atk * setupPhysical * totalPower / 260;
+  if (profile.primaryCategory === 'special') raw = stats.spa * setupSpecial * totalPower / 260;
+  if (profile.primaryCategory === 'mixed') raw = (stats.atk * setupPhysical * profile.physical + stats.spa * setupSpecial * profile.special) / 260;
+  return effectiveOutgoingPressure(raw, stats, profile);
 }
 
 function coarseDurability(stats, profile, set) {
   let value = stats.hp * (stats.def + stats.spd) / 26000;
   value += profile.setup * 0.12 + profile.hazard * 0.1;
+  value += profile.defensive?.recovery ? 0.35 + value * 0.2 : 0;
+  value += (profile.defensive?.statusPressure ?? 0) * 0.2;
+  value += (profile.defensive?.defenseBoost ?? 0) * 0.18;
+  value += (profile.utility?.screens ?? 0) * 0.16;
+  value += (profile.utility?.removal ?? 0) * 0.08;
+  if (isSustainItem(set.item) && isDefensiveProfile(profile)) value += 0.25;
+  if (isSustainAbility(set.ability) && isDefensiveProfile(profile)) value += 0.35;
   if (/focus sash/i.test(set.item)) value = Math.max(value, 1);
   return value;
+}
+
+function effectiveOutgoingPressure(rawDamage, stats, profile) {
+  const rawWeight = isDefensiveProfile(profile) ? 0.35 : profile.primaryCategory === 'utility' ? 0.5 : 1;
+  return rawDamage * rawWeight + rolePressure(stats, profile);
+}
+
+function rolePressure(stats, profile) {
+  const bulkFactor = Math.min(1.6, stats.hp * (stats.def + stats.spd) / 30000);
+  let pressure = 0;
+  pressure += (profile.defensive?.statusPressure ?? 0) * (7 + bulkFactor * 3);
+  pressure += (profile.defensive?.recovery ?? 0) * (3 + bulkFactor * 2);
+  pressure += (profile.defensive?.antiSetup ?? 0) * 4;
+  pressure += (profile.utility?.hazards ?? 0) * 5;
+  pressure += (profile.utility?.removal ?? 0) * 3;
+  pressure += (profile.utility?.screens ?? 0) * 3;
+  pressure += (profile.utility?.itemDisruption ?? 0) * 4;
+  pressure += (profile.utility?.lockPunish ?? 0) * 4;
+  pressure += (profile.utility?.itemTrick ?? 0) * 3;
+  pressure += (profile.utility?.pivot ?? 0) * 2;
+  pressure += (profile.utility?.teamHealing ?? 0) * 3;
+  pressure += (profile.utility?.wish ?? 0) * 3;
+  return pressure;
+}
+
+function roleDurabilityBonus(self, profile) {
+  const stats = self.stats;
+  const bulkFactor = Math.min(2.2, stats.hp * (stats.def + stats.spd) / 30000);
+  let bonus = profile.setup * 0.15 + profile.hazard * 0.1;
+  bonus += (profile.defensive?.recovery ?? 0) * (0.35 + bulkFactor * 0.25);
+  bonus += (profile.defensive?.statusPressure ?? 0) * 0.22;
+  bonus += (profile.defensive?.defenseBoost ?? 0) * 0.2;
+  bonus += (profile.defensive?.antiSetup ?? 0) * 0.15;
+  bonus += (profile.utility?.screens ?? 0) * 0.18;
+  bonus += (profile.utility?.removal ?? 0) * 0.08;
+  if (isSustainItem(self.item) && isDefensiveProfile(profile)) bonus += 0.25;
+  if (isSustainAbility(self.ability) && isDefensiveProfile(profile)) bonus += 0.4;
+  return bonus;
+}
+
+function isDefensiveProfile(profile) {
+  return profile.primaryCategory === 'defensive' || profile.primaryCategory === 'utility' || (profile.defensive?.recovery ?? 0) > 0;
+}
+
+function isSustainItem(item = '') {
+  return ['leftovers', 'blacksludge', 'sitrusberry', 'figyberry', 'wikiberry', 'magoberry', 'aguavberry', 'iapapaberry'].includes(toId(item));
+}
+
+function isSustainAbility(ability = '') {
+  return ['regenerator', 'poisonheal', 'magicguard', 'icebody', 'raindish'].includes(toId(ability));
 }
 
 function dominantOffensiveStat(stats, profile) {
@@ -205,17 +276,27 @@ function dominantOffensiveStat(stats, profile) {
   return stats.atk;
 }
 
-function maxMovePriority(moves) {
+export function speedPriorityForProfile(moves, profile) {
+  if (!['physical', 'special', 'mixed'].includes(profile.primaryCategory)) return 0;
+  return maxDamagingMovePriority(moves);
+}
+
+function maxDamagingMovePriority(moves) {
   return moves.reduce((best, moveName) => {
     const move = getMove(moveName);
-    return Math.max(best, move?.priority ?? 0);
+    if (!move || move.basePower <= 0 || move.category === 'Status') return best;
+    return Math.max(best, move.priority ?? 0);
   }, 0);
 }
 
 function makeSpeedEstimator(opponents) {
   const buckets = new Map();
+  let opponentWeight = 0;
   for (const opponent of opponents) {
-    buckets.set(opponent.speed, (buckets.get(opponent.speed) ?? 0) + opponent.weight);
+    const weight = Number(opponent.weight);
+    if (!Number.isFinite(weight) || weight <= 0) continue;
+    buckets.set(opponent.speed, (buckets.get(opponent.speed) ?? 0) + weight);
+    opponentWeight += weight;
   }
   const speeds = [...buckets.keys()].sort((a, b) => a - b);
   const prefix = [];
@@ -228,8 +309,46 @@ function makeSpeedEstimator(opponents) {
     const lessIndex = lowerBound(speeds, speed);
     const less = lessIndex <= 0 ? 0 : lessIndex >= speeds.length ? running : prefix[lessIndex];
     const equal = buckets.get(speed) ?? 0;
-    return less + equal * 0.5;
+    return (less + equal * 0.5 + SPEED_MIRROR_WEIGHT * 0.5) / (opponentWeight + SPEED_MIRROR_WEIGHT);
   };
+}
+
+export function speedValueCoefficient(profile) {
+  const roles = new Set(profile.roles?.map((role) => role.id) ?? []);
+  const hasRecovery = roles.has('recoveryWall') || (profile.defensive?.recovery ?? 0) > 0;
+  const hasStatusPressure = roles.has('statusPressure') || (profile.defensive?.statusPressure ?? 0) > 0;
+  const hasHazardOrRemoval =
+    (profile.utility?.hazards ?? 0) > 0 ||
+    (profile.utility?.removal ?? 0) > 0 ||
+    roles.has('stealthRock') ||
+    roles.has('spikes') ||
+    roles.has('toxicSpikes') ||
+    roles.has('stickyWeb') ||
+    roles.has('hazardRemoval') ||
+    roles.has('tidyUp');
+  const hasSpeedDisruption =
+    (profile.utility?.screens ?? 0) > 0 ||
+    (profile.utility?.lockPunish ?? 0) > 0 ||
+    (profile.utility?.antiSetup ?? 0) > 0 ||
+    (profile.utility?.itemTrick ?? 0) > 0 ||
+    roles.has('screens') ||
+    roles.has('lockPunish') ||
+    roles.has('antiSetup') ||
+    roles.has('itemTrick');
+  const hasPivot = (profile.utility?.pivot ?? 0) > 0 || roles.has('pivot');
+  const isOffensive = ['physical', 'special', 'mixed'].includes(profile.primaryCategory);
+
+  if (hasRecovery && hasStatusPressure && !hasSpeedDisruption && !hasPivot && !profile.setup) return 0.2;
+  if (hasSpeedDisruption) return 1.1;
+  if (isOffensive && profile.setup) return 1.15;
+  if (hasRecovery && !hasSpeedDisruption && !hasPivot) return 0.3;
+  if (hasStatusPressure && !hasRecovery) return 0.6;
+  if (hasHazardOrRemoval) return 0.6;
+  return 1;
+}
+
+function speedEvalProbability(pRaw, coefficient) {
+  return Math.min(P_EVAL_CAP, Math.max(0, pRaw * coefficient));
 }
 
 function lowerBound(values, target) {
@@ -280,6 +399,14 @@ function explainCandidate(candidate, profile, set) {
   if (profile.primaryCategory === 'physical') priorities.push('physical damage');
   if (profile.primaryCategory === 'special') priorities.push('special damage');
   if (profile.primaryCategory === 'mixed') priorities.push('mixed damage');
+  if (profile.primaryCategory === 'defensive') priorities.push('defensive utility');
+  if (profile.primaryCategory === 'utility') priorities.push('team utility');
+  if (profile.defensive?.recovery) priorities.push('recovery');
+  if (profile.defensive?.statusPressure) priorities.push('status pressure');
+  if (profile.utility?.hazards) priorities.push('hazards');
+  if (profile.utility?.removal) priorities.push('removal');
+  if (profile.utility?.screens) priorities.push('screens');
+  if (profile.utility?.pivot) priorities.push('pivot');
   if (candidate.statPoints.spe >= 24) priorities.push('speed control');
   if (candidate.statPoints.hp + candidate.statPoints.def + candidate.statPoints.spd >= 18) priorities.push('bulk');
   if (/focus sash/i.test(set.item)) priorities.push('Focus Sash action floor');
@@ -289,9 +416,16 @@ function explainCandidate(candidate, profile, set) {
 function buildExplanations({ input, attackProfile, result, statsResult }) {
   const explanations = [];
   explanations.push(`Attack profile: ${attackProfile.primaryCategory}`);
+  const roleNames = attackProfile.roles?.map((role) => role.id) ?? [];
+  if (roleNames.length) explanations.push(`Move roles: ${roleNames.join(', ')}`);
   if (attackProfile.setup) explanations.push('Setup moves slightly increase durability/action value in the MVP model.');
   if (attackProfile.hazard) explanations.push('Hazard moves add a small utility value through longer-game pressure.');
+  if (attackProfile.defensive?.recovery) explanations.push('Recovery moves increase longer-game durability value.');
+  if (attackProfile.defensive?.statusPressure) explanations.push('Status pressure is treated as outgoing pressure for defensive sets.');
+  if (speedValueCoefficient(attackProfile) !== 1) explanations.push(`Speed value coefficient: ${speedValueCoefficient(attackProfile).toFixed(2)}.`);
   if (/focus sash/i.test(input.item)) explanations.push('Focus Sash is reflected as a minimum one-action durability floor.');
+  if (isSustainItem(input.item) && isDefensiveProfile(attackProfile)) explanations.push('Sustain items increase defensive role durability.');
+  if (isSustainAbility(input.ability) && isDefensiveProfile(attackProfile)) explanations.push('Sustain abilities increase defensive role durability.');
   explanations.push(...megaPlugin.explain({ input, megaAssumption: result.megaAssumption }));
   if (statsResult.warning) explanations.push(statsResult.warning);
   return explanations;

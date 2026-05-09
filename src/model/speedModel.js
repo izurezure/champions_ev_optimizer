@@ -1,3 +1,5 @@
+export const SPEED_MIRROR_WEIGHT = 0.01;
+
 export function speedWin(self, opp) {
   const selfPriority = self.priority ?? 0;
   const oppPriority = opp.priority ?? 0;
@@ -18,11 +20,19 @@ export function effectiveSpeed(speed, { item = '', ability = '', weatherSpeedAbi
   return Math.floor(value);
 }
 
-export function estimateSpeedWinProbability(self, opponents, priority = 0) {
-  if (!opponents.length) return 0.5;
-  return opponents.reduce((sum, opponent) => {
-    return sum + opponent.weight * speedWin({ speed: self.speed, priority }, { speed: opponent.speed, priority: opponent.priority ?? 0 });
-  }, 0);
+export function estimateSpeedWinProbability(self, opponents, priority = self.priority ?? 0) {
+  const selfPriority = priority ?? 0;
+  let winWeight = SPEED_MIRROR_WEIGHT * 0.5;
+  let totalWeight = SPEED_MIRROR_WEIGHT;
+
+  for (const opponent of opponents) {
+    const weight = Number(opponent.weight);
+    if (!Number.isFinite(weight) || weight <= 0) continue;
+    winWeight += weight * speedWin({ speed: self.speed, priority: selfPriority }, { speed: opponent.speed, priority: opponent.priority ?? 0 });
+    totalWeight += weight;
+  }
+
+  return totalWeight > 0 ? winWeight / totalWeight : 0.5;
 }
 
 function sameName(a, b) {

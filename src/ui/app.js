@@ -1,3 +1,5 @@
+import { formatLabelForId, ratingStateForFormat } from './formatOptions.js';
+
 const $ = (selector) => document.querySelector(selector);
 const fields = ['format', 'month', 'rating', 'megaPolicy', 'naturePolicy', 'setupBoost', 'excludeOther'];
 
@@ -9,6 +11,10 @@ async function init() {
   config = await fetchJson('/api/config');
   fillFormats(config.formats, config.defaults);
   $('#calculate').addEventListener('click', calculate);
+  $('#format').addEventListener('change', () => {
+    syncRatingOptions($('#format').value, $('#rating').value);
+    calculate();
+  });
   $('#rating').addEventListener('change', calculate);
   $('#month').addEventListener('change', calculate);
   log(config.log.join('\n'));
@@ -17,13 +23,18 @@ async function init() {
 
 function fillFormats(formats, defaults) {
   $('#format').innerHTML = formats.map((format) => `<option value="${format.id}">${format.label}</option>`).join('');
-  $('#rating').innerHTML = formats[0].ratings.map((rating) => `<option value="${rating}">${rating}</option>`).join('');
   $('#format').value = defaults.format;
-  $('#rating').value = defaults.rating;
+  syncRatingOptions(defaults.format, defaults.rating);
   $('#month').value = defaults.month;
   $('#megaPolicy').value = defaults.megaPolicy;
   $('#naturePolicy').value = defaults.naturePolicy;
   $('#setupBoost').value = String(defaults.setupBoost);
+}
+
+function syncRatingOptions(formatId, currentRating) {
+  const state = ratingStateForFormat({ formats: config.formats, formatId, currentRating });
+  $('#rating').innerHTML = state.ratings.map((rating) => `<option value="${rating}">${rating}</option>`).join('');
+  $('#rating').value = state.selectedRating;
 }
 
 async function calculate() {
@@ -49,7 +60,8 @@ async function calculate() {
 }
 
 function render(result) {
-  $('#summary').textContent = `${result.input.species} / ${result.attackProfile.primaryCategory} / ${result.month} / ${result.rating} / ${result.source}`;
+  const formatLabel = result.formatLabel || formatLabelForId(config.formats, result.format);
+  $('#summary').textContent = `${result.input.species} / ${formatLabel} / ${result.attackProfile.primaryCategory} / ${result.month} / ${result.rating} / ${result.source}`;
   $('#results').innerHTML = result.results.map((row) => `
     <tr>
       <td>${row.rank}</td>

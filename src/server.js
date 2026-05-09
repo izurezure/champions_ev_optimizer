@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { optimizeFromPaste } from './model/optimizer.js';
 import { loadChaosStats } from './stats/smogonClient.js';
+import { validateConfig, validateStartupConfig } from './config/validation.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(HERE, 'ui');
@@ -14,8 +15,9 @@ const port = Number(process.env.PORT || 3000);
 const host = '127.0.0.1';
 const statsCache = new Map();
 const startupLog = [];
+const VALIDATED_DEFAULTS = validateStartupConfig({ defaults: DEFAULTS, formats: FORMATS });
 
-await primeStats(DEFAULTS).catch((error) => {
+primeStats(VALIDATED_DEFAULTS).catch((error) => {
   startupLog.push(`Startup stats update failed: ${error.message}`);
 });
 
@@ -23,25 +25,26 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (request.method === 'GET' && url.pathname === '/api/config') {
-      return sendJson(response, { defaults: DEFAULTS, formats: FORMATS, log: startupLog });
+      return sendJson(response, { defaults: VALIDATED_DEFAULTS, formats: FORMATS, log: startupLog });
     }
     if (request.method === 'POST' && url.pathname === '/api/optimize') {
       const body = await readJson(request);
+      const config = validateConfig(body, { defaults: DEFAULTS, formats: FORMATS });
       const options = {
-        ...DEFAULTS,
-        ...body,
+        ...config,
         statsProvider: async (config) => getStats(config)
       };
       const result = await optimizeFromPaste(body.paste, options);
       return sendJson(response, result);
     }
     if (request.method === 'GET' && url.pathname === '/api/stats') {
-      const config = { ...DEFAULTS, ...Object.fromEntries(url.searchParams) };
+      const config = validateConfig(Object.fromEntries(url.searchParams), { defaults: DEFAULTS, formats: FORMATS });
       return sendJson(response, await getStats(config));
     }
     return serveStatic(response, url.pathname);
   } catch (error) {
-    return sendJson(response, { error: error.message || String(error) }, 500);
+    const status = error.name === 'ValidationError' ? 400 : 500;
+    return sendJson(response, { error: error.message || String(error) }, status);
   }
 });
 
@@ -55,7 +58,7 @@ async function primeStats(config) {
 }
 
 async function getStats(config) {
-  const key = `${config.month}|${config.format}|${config.rating}`;
+  const key = `${config.month}|${config.smogonFormat}|${config.rating}`;
   if (!statsCache.has(key)) {
     const result = await loadChaosStats(config);
     statsCache.set(key, result);
