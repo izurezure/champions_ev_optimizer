@@ -4,6 +4,7 @@ const SAFE_RATING_RE = /^\d+$/;
 const MEGA_POLICIES = new Set(['auto', 'always', 'never']);
 const NATURE_POLICIES = new Set(['fixed', 'neutral', 'optimize']);
 const SETUP_BOOSTS = new Set(['0', '1', '2']);
+const SPEED_MODES = new Set(['global', 'fixed']);
 
 export function validateStartupConfig({ defaults, formats }) {
   validateFormatRegistry(formats);
@@ -22,6 +23,8 @@ export function validateConfig(input = {}, { defaults, formats }) {
   const megaPolicy = validateSetValue('megaPolicy', source.megaPolicy ?? defaults.megaPolicy ?? 'auto', MEGA_POLICIES);
   const naturePolicy = validateSetValue('naturePolicy', source.naturePolicy ?? defaults.naturePolicy ?? 'fixed', NATURE_POLICIES);
   const setupBoost = validateSetupBoost(source.setupBoost ?? defaults.setupBoost ?? 0);
+  const speedMode = validateSetValue('speedMode', source.speedMode ?? defaults.speedMode ?? 'global', SPEED_MODES);
+  const speedPoints = validateSpeedPoints(speedMode, source.speedPoints ?? defaults.speedPoints ?? null);
   const excludeOther = validateBoolean('excludeOther', source.excludeOther ?? defaults.excludeOther ?? true);
 
   return {
@@ -35,6 +38,8 @@ export function validateConfig(input = {}, { defaults, formats }) {
     megaPolicy,
     naturePolicy,
     setupBoost,
+    speedMode,
+    speedPoints,
     excludeOther
   };
 }
@@ -107,6 +112,18 @@ function validateSetupBoost(value) {
     throw validationError(`Invalid setupBoost "${text}". Allowed values: 0, 1, 2`);
   }
   return Number(text);
+}
+
+function validateSpeedPoints(speedMode, value) {
+  if (speedMode === 'global') return null;
+  if (value === null || value === undefined || value === '') {
+    throw validationError('Invalid speedPoints "". Use an integer from 0 to 32 when speedMode is fixed.');
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0 || number > 32) {
+    throw validationError(`Invalid speedPoints "${value}". Use an integer from 0 to 32 when speedMode is fixed.`);
+  }
+  return number;
 }
 
 function validateBoolean(name, value) {

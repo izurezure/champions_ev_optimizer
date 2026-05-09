@@ -28,6 +28,11 @@ Japanese documentation is available in [README.ja.md](README.ja.md).
 - Opponent sampling from usage, abilities, items, spreads, and moves.
 - Speed-order probability `P`, outgoing damage or role pressure `D_out`,
   durability value `V`, inverse HP constant `n`, and explanatory coefficient `m`.
+- Speed-first optimization with an optional fixed Spe Stat Point target before
+  maximizing `Z` over the remaining budget.
+- Pasted `EVs`, `SP`, or `Stat Points` lines that explicitly include `Spe` or
+  `S` automatically become the fixed Spe target. If Spe is omitted, speed is
+  treated as unentered rather than as fixed at 0.
 - Mega Evolution policy support: `auto`, `always`, and `never`.
 - Stub plugin slots for Z-Move, Dynamax, and Terastal support.
 - Regression tests for offensive, mixed, OU, and defensive utility profiles.
@@ -65,8 +70,8 @@ npm.cmd start
 ## GUI Usage
 
 1. Paste a Pokemon Showdown set into the input area.
-2. Choose BSS or OU, month, rating, Mega policy, nature policy, and setup
-   scenario.
+2. Choose BSS or OU, month, rating, Mega policy, nature policy, setup scenario,
+   and optionally a fixed Spe target.
 3. Click `Calculate`.
 4. Review the ranked table and generated Showdown paste output.
 
@@ -113,6 +118,15 @@ Common options:
 --nature  fixed, neutral, or optimize
 --mega    auto, always, or never
 --setup   0, 1, or 2
+--speed   global or fixed
+--spe     Spe Stat Points for --speed fixed, 0..32
+```
+
+For speed-first optimization, fix Spe first and maximize `Z` with the remaining
+Stat Points:
+
+```sh
+node src/cli.js --speed fixed --spe 20 < set.txt
 ```
 
 ## Example Input
@@ -181,6 +195,13 @@ profiles search bulk-oriented allocations, while mixed attackers use a bounded
 offensive grid plus exact allocation over the remaining stats so arbitrary paste
 input remains responsive.
 
+When `--speed fixed --spe N` is used, every ranked candidate keeps `Spe` at `N`.
+The optimizer then spends the remaining budget on the role-appropriate offensive
+and defensive stats and reports the fixed speed assumption in the explanations.
+The same fixed-speed behavior is inferred from paste input such as
+`EVs: 15 Spe` or `EVs: 15 S`; an EV line without Spe leaves speed in the normal
+global search.
+
 ## Smogon Data and Cache
 
 Smogon stats are fetched from:
@@ -218,6 +239,8 @@ The test suite covers:
 - Smogon chaos URL generation, format-aware `latest`, cache fallback, and BSS/OU
   cache separation.
 - Config validation for format, month, rating, and unsupported format metadata.
+- Fixed Spe validation and speed-first optimization behavior.
+- Paste-inferred Spe targets and the no-Spe-is-unentered case.
 - GUI rating synchronization when formats change.
 - Speed-order probability.
 - Total power index formula.

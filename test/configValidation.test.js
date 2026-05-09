@@ -9,7 +9,9 @@ const defaults = {
   megaPolicy: 'auto',
   naturePolicy: 'fixed',
   excludeOther: true,
-  setupBoost: 0
+  setupBoost: 0,
+  speedMode: 'global',
+  speedPoints: null
 };
 
 const formats = [
@@ -45,6 +47,24 @@ test('validateConfig accepts Champions OU and returns URL-facing metadata separa
   assert.equal(config.month, '2026-04');
   assert.equal(config.rating, '1500');
   assert.equal(config.setupBoost, 2);
+});
+
+test('validateConfig accepts fixed speed points for speed-first optimization', () => {
+  const config = validateConfig(
+    { speedMode: 'fixed', speedPoints: '20' },
+    { defaults, formats }
+  );
+
+  assert.equal(config.speedMode, 'fixed');
+  assert.equal(config.speedPoints, 20);
+});
+
+test('validateConfig rejects invalid fixed speed settings', () => {
+  assert.throws(() => validateConfig({ speedMode: 'auto' }, { defaults, formats }), /Invalid speedMode/);
+  assert.throws(() => validateConfig({ speedMode: 'fixed' }, { defaults, formats }), /speedPoints/);
+  assert.throws(() => validateConfig({ speedMode: 'fixed', speedPoints: '-1' }, { defaults, formats }), /speedPoints/);
+  assert.throws(() => validateConfig({ speedMode: 'fixed', speedPoints: '33' }, { defaults, formats }), /speedPoints/);
+  assert.throws(() => validateConfig({ speedMode: 'fixed', speedPoints: '4.5' }, { defaults, formats }), /speedPoints/);
 });
 
 test('validateConfig rejects unknown format, invalid month, and invalid rating before URL use', () => {
