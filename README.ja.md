@@ -3,8 +3,8 @@
 Pokemon Champions の Stat Point 配分をローカルで最適化するツールです。
 
 Pokemon Showdown paste を入力として受け取り、Smogon の
-`[Gen 9 Champions] BSS Reg M-A` chaos 統計を更新・取得し、相手メタ母集団を生成したうえで、
-`champions_ev_optimizer_spec.md` の総合能力指数に基づいて合法な Champions Stat Point 配分を順位付けします。
+`[Gen 9 Champions] BSS Reg M-A` または `[Gen 9 Champions] OU` の chaos 統計を更新・取得し、
+選択formatの相手メタ母集団を生成したうえで、`champions_ev_optimizer_spec.md` の総合能力指数に基づいて合法な Champions Stat Point 配分を順位付けします。
 
 既定のREADMEは英語版の [README.md](README.md) です。
 
@@ -12,18 +12,20 @@ Pokemon Showdown paste を入力として受け取り、Smogon の
 
 - `127.0.0.1` のみにバインドするローカルGUI。
 - 再現しやすいCLI実行。
+- Champions BSS Reg M-A と Champions OU のformat選択。
+- format、年月、レート帯、Mega policy、Nature policy、積みシナリオ、`Other` 除外の共通validation。
 - Pokemon Showdown paste から、種族、持ち物、特性、レベル、性格、技、配分行を解析。
 - Champions Stat Point を直接処理:
   - 各ステータス: `0..32`
   - 合計: `0..66`
   - 対象: `HP / Atk / Def / SpA / SpD / Spe`
-- Smogon chaos JSON の更新確認、取得、gzip/JSONキャッシュ。
+- Smogon chaos JSON の更新確認、取得、format別gzip/JSONキャッシュ。
 - `Other` を除外した条件付き割合への正規化。
 - 使用率、特性、持ち物、配分、技から相手サンプルを生成。
-- 先攻確率 `P`、与ダメージ `D_out`、耐久価値 `V`、相手HP逆数 `n`、説明用係数 `m` を出力。
+- 先攻確率 `P`、与ダメージまたはロール圧力 `D_out`、耐久価値 `V`、相手HP逆数 `n`、説明用係数 `m` を出力。
 - Mega policy: `auto`, `always`, `never`。
 - Z技、ダイマックス、テラスタル用の拡張stub。
-- 仕様書のGarchomp入力に対する回帰テスト。
+- 攻撃型、混合型、OU、耐久ユーティリティ型に対する回帰テスト。
 
 ## 必要環境
 
@@ -56,24 +58,33 @@ npm.cmd start
 ## GUIの使い方
 
 1. 入力欄に Pokemon Showdown paste を貼り付けます。
-2. format、年月、レート帯、Mega policy、Nature policy、積みシナリオを選びます。
+2. BSSまたはOU、年月、レート帯、Mega policy、Nature policy、積みシナリオを選びます。
 3. `Calculate` を押します。
 4. 結果テーブルと生成された Showdown paste を確認します。
 
-既定formatは次です。
+対応formatは次です。
 
 ```text
 gen9championsbssregma
+gen9championsou
 ```
 
-Smogon年月の既定値は `latest` です。Smogon stats index を確認し、利用可能な最新月を使います。ネットワーク更新に失敗し、キャッシュが存在する場合は、警告を出したうえでキャッシュを使用します。
+既定formatは引き続き `gen9championsbssregma` です。
+
+Smogon年月の既定値は `latest` です。Smogon stats index を確認し、選択formatとレート帯の統計が存在する最新月を使います。ネットワーク更新に失敗し、対応するキャッシュが存在する場合は、警告を出したうえでキャッシュを使用します。
 
 ## CLIの使い方
 
 標準入力からpasteを渡します。
 
 ```sh
-node src/cli.js --month latest --rating 1500 < set.txt
+node src/cli.js --format gen9championsbssregma --month latest --rating 1500 < set.txt
+```
+
+Champions OUを既知の年月で実行します。
+
+```sh
+node src/cli.js --format gen9championsou --month 2026-04 --rating 1500 < set.txt
 ```
 
 ファイルからpasteを渡します。
@@ -86,7 +97,7 @@ node src/cli.js --file set.txt --month 2026-04 --rating 1500 --nature optimize -
 
 ```text
 --month   latest, 2026-04 など
---format  gen9championsbssregma
+--format  gen9championsbssregma または gen9championsou
 --rating  0, 1500, 1630, 1760
 --nature  fixed, neutral, optimize
 --mega    auto, always, never
@@ -144,13 +155,13 @@ Z = D_out * (V + P) / { 1 + n * D_out * (1/2 - P) }
 
 各値の意味:
 
-- `D_out`: サンプル相手への重み付き期待与ダメージ。
+- `D_out`: サンプル相手への重み付き圧力。純粋な攻撃型では期待与ダメージ、ユーティリティ型では状態異常、設置技、回復、除去、壁、対面操作などの技ベース圧力も含みます。
 - `P`: 重み付き先攻確率。
 - `V`: 重み付き耐久・行動価値。
 - `n`: `E[1 / opponentHP]`。
 - `m`: `D_out / offensiveStat` として出す説明用係数。
 
-実装は、隠れた手作業調整よりも、検証可能で決定的なMVP挙動を優先しています。物理型・特殊型では支配劣位の配分を除外します。混合型では攻撃2軸を代表点に絞り、残りステータスを厳密配分することで、任意paste入力でも応答性を保ちます。
+実装は、隠れた手作業調整よりも、検証可能で決定的なMVP挙動を優先しています。プロファイルはポケモン名ではなく技から推定します。物理型・特殊型では支配劣位の配分を除外します。耐久型・ユーティリティ型では耐久寄りの配分を探索し、混合型では攻撃2軸を代表点に絞り、残りステータスを厳密配分することで、任意paste入力でも応答性を保ちます。
 
 ## Smogonデータとキャッシュ
 
@@ -166,7 +177,10 @@ https://www.smogon.com/stats/
 src/stats/cache/
 ```
 
-キャッシュファイルはgit管理対象外です。削除しても問題ありません。次回実行時に再取得を試みます。
+キャッシュファイルは年月、canonical Smogon format id、レート帯ごとに分離されます。例: `2026-04-gen9championsou-1500.json.gz`。
+これらはgit管理対象外です。削除しても問題ありません。次回実行時に再取得を試みます。
+
+OUのcanonical idは `gen9championsou` です。綴り違いの `gen9champoinsou` へ黙ってfallbackしません。canonical統計が対象年月に存在しない場合、その年月は選択formatで利用不可として扱います。
 
 ## テスト
 
@@ -179,12 +193,16 @@ npm test
 - Showdown paste 解析。
 - Champions Stat Point 制約と実数値計算式。
 - `Other` 除外正規化。
-- Smogon chaos URL生成とキャッシュfallback。
+- Smogon chaos URL生成、format-aware `latest`、キャッシュfallback、BSS/OU cache分離。
+- format、年月、レート帯、unsupported format metadataのconfig validation。
+- GUIでformat変更時のrating同期。
 - 先攻確率。
 - 総合能力指数の式。
 - Mega plugin。
 - Garchomp回帰。
+- Champions OU回帰。
 - 混合アタッカーのbounded optimization。
+- 技ベースのロール分類と耐久ユーティリティ型の回帰。
 
 ## ディレクトリ構成
 
@@ -206,6 +224,7 @@ test/
 - ダメージ計算はMVP近似です。Pokemonデータ、技威力、タイプ相性、STAB、一部持ち物、一部特性を使いますが、完全なバトルシミュレータではありません。
 - 天候、フィールド、場の状態、揮発状態、チーム単位の制約は限定的です。
 - 単体pasteから、チーム内のメガシンカ権の使用者までは確定できません。別のメガ枠がいる場合は `--mega never` でも比較してください。
+- OUの完全な合法性、banlist検証、6匹単位のチーム最適化は今回のMVP対象外です。OUでは、選択したOUのSmogon相手母集団を使い、BSSと同じ単体ポケモン用 Champions Stat Point optimizer で評価します。
 
 ## トラブルシューティング
 
@@ -219,7 +238,7 @@ npm.cmd start
 Smogon更新に失敗する場合、存在が分かっている年月を指定して一度実行してください。
 
 ```sh
-node src/cli.js --month 2026-04 --rating 1500 < set.txt
+node src/cli.js --format gen9championsou --month 2026-04 --rating 1500 < set.txt
 ```
 
 キャッシュが古い場合は、`src/stats/cache/` を削除して再実行してください。
